@@ -2,15 +2,83 @@
 import { ref, computed, onMounted } from 'vue'
 import { Html5QrcodeScanner } from "html5-qrcode"
 import { getAllRecords, addRecordWithImage, deleteRecordFromDB } from './db'
+import { GoogleGenerativeAI } from "@google/generative-ai"
 
 // State
 const records = ref([])
 const searchQuery = ref('')
 const showScanner = ref(false)
 const isSearchingNet = ref(false)
+const isAnalyzingAI = ref(false)
 const newRecord = ref({ title: '', artist: '', type: 'Vinyl', catalog: '', barcode: '' })
 const newRecordImage = ref(null) // File object
 const newRecordImagePreview = ref(null) // URL for preview
+const geminiApiKey = ref(localStorage.getItem('gemini_api_key') || '')
+const showSettings = ref(false)
+
+// Save API Key
+const saveApiKey = () => {
+  localStorage.setItem('gemini_api_key', geminiApiKey.value)
+  showSettings.value = false
+  alert('API Key 已儲存')
+}
+
+// AI Analysis
+const analyzeImageWithAI = async (file) => {
+  if (!geminiApiKey.value) {
+    alert('請先點擊右上角 ⚙️ 設定 Gemini API Key 才能使用 AI 分析')
+    showSettings.value = true
+    return
+  }
+
+  isAnalyzingAI.value = true
+  try {
+    const genAI = new GoogleGenerativeAI(geminiApiKey.value)
+    const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" })
+
+    // Convert file to base64
+    const base64Data = await new Promise((resolve) => {
+      const reader = new FileReader()
+      reader.onloadend = () => resolve(reader.result.split(',')[1])
+      reader.readAsDataURL(file)
+    })
+
+    const prompt = `Analyze this image of a music album (cover or back). 
+    Extract the following details and return them in STRICT JSON format:
+    {
+      "artist": "Artist Name",
+      "title": "Album Title",
+      "catalog": "Catalog Number (if visible)",
+      "barcode": "Barcode Number (if visible)",
+      "type": "Vinyl or CD or Cassette (guess based on shape/spine)"
+    }
+    If you can't find specific info, leave it empty string. Do not use code blocks.`
+
+    const result = await model.generateContent([
+      prompt,
+      { inlineData: { data: base64Data, mimeType: file.type } }
+    ])
+    
+    const response = await result.response
+    const text = response.text().replace(/```json|```/g, '').trim()
+    const data = JSON.parse(text)
+
+    // Auto-fill form
+    if (data.title) newRecord.value.title = data.title
+    if (data.artist) newRecord.value.artist = data.artist
+    if (data.catalog) newRecord.value.catalog = data.catalog
+    if (data.barcode) newRecord.value.barcode = data.barcode
+    if (data.type) newRecord.value.type = data.type
+
+    alert(`🤖 AI 分析完成！\n藝人: ${data.artist}\n專輯: ${data.title}`)
+
+  } catch (e) {
+    console.error(e)
+    alert('AI 分析失敗: ' + e.message)
+  } finally {
+    isAnalyzingAI.value = false
+  }
+}
 
 // Load from DB on mount
 onMounted(async () => {
@@ -44,6 +112,13 @@ const handleNewImageSelect = (e) => {
   if (file) {
     newRecordImage.value = file
     newRecordImagePreview.value = URL.createObjectURL(file)
+    
+    // Trigger AI analysis if key is present
+    if (geminiApiKey.value) {
+      if(confirm('要使用 AI 自動分析這張圖片的資訊嗎？')) {
+        analyzeImageWithAI(file)
+      }
+    }
   }
 }
 
@@ -154,9 +229,25 @@ const autoFillByTitle = () => {
 <template>
   <div class="container mx-auto p-6 max-w-3xl">
     <header class="mb-8 flex justify-between items-center border-b border-gray-700 pb-4">
-      <h1 class="text-2xl font-bold text-emerald-400">💿 唱片管理系統 <span class="text-xs text-gray-500">v0.3 (Local DB)</span></h1>
-      <div class="text-sm">Total: {{ records.length }}</div>
+      <h1 class="text-2xl font-bold text-emerald-400">💿 唱片管理系統 <span class="text-xs text-gray-500">v0.4 (AI)</span></h1>
+      <div class="flex items-center gap-4">
+        <button @click="showSettings = !showSettings" class="text-gray-400 hover:text-white transition">
+          ⚙️ 設定
+        </button>
+        <div class="text-sm">Total: {{ records.length }}</div>
+      </div>
     </header>
+
+    <!-- Settings Modal -->
+    <div v-if="showSettings" class="mb-8 bg-gray-800 p-4 rounded border border-gray-600">
+      <h3 class="font-bold mb-2">設定 Gemini API Key</h3>
+      <div class="flex gap-2">
+        <input type="password" v-model="geminiApiKey" placeholder="貼上 API Key (AI 辨識用)" 
+               class="bg-gray-700 p-2 rounded flex-1 text-white" />
+        <button @click="saveApiKey" class="bg-blue-600 hover:bg-blue-500 px-4 rounded font-bold">儲存</button>
+      </div>
+      <p class="text-xs text-gray-500 mt-2">Key 僅儲存於本地瀏覽器，不會上傳伺服器。</p>
+    </div>
 
     <!-- Search & Tools -->
     <div class="mb-8 grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -179,8 +270,8 @@ const autoFillByTitle = () => {
 
     <!-- Add Form -->
     <form @submit.prevent="addRecord" class="bg-gray-800 p-4 rounded mb-8 border border-gray-700 relative">
-      <div v-if="isSearchingNet" class="absolute inset-0 bg-gray-900/80 z-10 flex items-center justify-center text-emerald-400 font-bold rounded">
-        連線搜尋中...
+      <div v-if="isSearchingNet || isAnalyzingAI" class="absolute inset-0 bg-gray-900/80 z-10 flex items-center justify-center text-emerald-400 font-bold rounded">
+        {{ isAnalyzingAI ? '🤖 AI 分析圖片中...' : '連線搜尋中...' }}
       </div>
       
       <div class="flex justify-between items-center mb-4">

@@ -9,6 +9,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@google/generative-ai": "^0.24.1",
     "html5-qrcode": "^2.3.8",
     "idb": "^8.0.3",
     "vue": "^3.4.15"
