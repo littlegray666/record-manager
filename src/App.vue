@@ -61,23 +61,29 @@ const analyzeImageWithAI = async (file) => {
       const listResp = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${geminiApiKey.value}`)
       if (listResp.ok) {
         const listData = await listResp.json()
-        // Find best vision model: prefer 1.5-flash, then 1.5-pro, then pro-vision
+        // Filter for Gemini models that support content generation
         const viableModels = listData.models
-          .filter(m => m.supportedGenerationMethods.includes("generateContent"))
+          .filter(m => 
+            m.supportedGenerationMethods.includes("generateContent") && 
+            m.name.includes("gemini")
+          )
           .map(m => m.name.replace("models/", ""))
         
-        console.log("Available models:", viableModels)
+        console.log("Available models from API:", viableModels)
 
-        // Priority list
-        const priorities = ["gemini-1.5-flash", "gemini-1.5-pro", "gemini-pro-vision", "gemini-1.0-pro-vision"]
-        
-        for (const p of priorities) {
-          // Check for exact match or versioned match (e.g. gemini-1.5-flash-001)
-          const match = viableModels.find(m => m === p || m.startsWith(p))
-          if (match) {
-            selectedModel = match
-            break
+        // Sort by version number (descending) to find the "newest"
+        // Extracts "1.5", "2.0", etc.
+        viableModels.sort((a, b) => {
+          const getVer = (s) => {
+            const match = s.match(/(\d+)\.(\d+)/)
+            return match ? parseFloat(match[0]) : 0
           }
+          return getVer(b) - getVer(a)
+        })
+
+        if (viableModels.length > 0) {
+          selectedModel = viableModels[0] // Pick the highest version model
+          console.log(`Auto-selected newest model: ${selectedModel}`)
         }
       }
     } catch (e) {
