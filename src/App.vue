@@ -35,32 +35,31 @@ const analyzeImageWithAI = async (file) => {
 
   isAnalyzingAI.value = true
   try {
-    const genAI = new GoogleGenerativeAI(geminiApiKey.value)
-    // Use specific version model to avoid 404 on alias
-    const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash-002" })
+    const modelsToTry = ["gemini-1.5-flash", "gemini-1.5-pro", "gemini-1.5-flash-8b"]
+    let model = null
+    let result = null
+    let lastError = null
 
-    // Convert file to base64
-    const base64Data = await new Promise((resolve) => {
-      const reader = new FileReader()
-      reader.onloadend = () => resolve(reader.result.split(',')[1])
-      reader.readAsDataURL(file)
-    })
-
-    const prompt = `Analyze this image of a music album (cover or back). 
-    Extract the following details and return them in STRICT JSON format:
-    {
-      "artist": "Artist Name",
-      "title": "Album Title",
-      "catalog": "Catalog Number (if visible)",
-      "barcode": "Barcode Number (if visible)",
-      "type": "Vinyl or CD or Cassette (guess based on shape/spine)"
+    for (const modelName of modelsToTry) {
+      try {
+        console.log(`Trying model: ${modelName}...`)
+        model = genAI.getGenerativeModel({ model: modelName })
+        result = await model.generateContent([
+          prompt,
+          { inlineData: { data: base64Data, mimeType: file.type } }
+        ])
+        // If we get here, it worked
+        break 
+      } catch (e) {
+        console.warn(`Model ${modelName} failed:`, e)
+        lastError = e
+        // Continue to next model
+      }
     }
-    If you can't find specific info, leave it empty string. Do not use code blocks.`
 
-    const result = await model.generateContent([
-      prompt,
-      { inlineData: { data: base64Data, mimeType: file.type } }
-    ])
+    if (!result) {
+      throw lastError || new Error("All AI models failed.")
+    }
     
     const response = await result.response
     const text = response.text().replace(/```json|```/g, '').trim()
