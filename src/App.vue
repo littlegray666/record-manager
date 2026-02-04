@@ -55,32 +55,43 @@ const analyzeImageWithAI = async (file) => {
     }
     If you can't find specific info, leave it empty string. Do not use code blocks.`
 
-    const modelsToTry = ["gemini-1.5-flash", "gemini-1.5-pro", "gemini-1.5-flash-8b", "gemini-pro-vision"]
-    let model = null
-    let result = null
-    let lastError = null
+    // 1. Dynamic Model Discovery
+    let selectedModel = "gemini-1.5-flash" // Default fallback
+    try {
+      const listResp = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${geminiApiKey.value}`)
+      if (listResp.ok) {
+        const listData = await listResp.json()
+        // Find best vision model: prefer 1.5-flash, then 1.5-pro, then pro-vision
+        const viableModels = listData.models
+          .filter(m => m.supportedGenerationMethods.includes("generateContent"))
+          .map(m => m.name.replace("models/", ""))
+        
+        console.log("Available models:", viableModels)
 
-    for (const modelName of modelsToTry) {
-      try {
-        console.log(`Trying model: ${modelName}...`)
-        model = genAI.getGenerativeModel({ model: modelName })
-        result = await model.generateContent([
-          prompt,
-          { inlineData: { data: base64Data, mimeType: file.type } }
-        ])
-        // If we get here, it worked
-        break 
-      } catch (e) {
-        console.warn(`Model ${modelName} failed:`, e)
-        lastError = e
-        // Continue to next model
+        // Priority list
+        const priorities = ["gemini-1.5-flash", "gemini-1.5-pro", "gemini-pro-vision", "gemini-1.0-pro-vision"]
+        
+        for (const p of priorities) {
+          // Check for exact match or versioned match (e.g. gemini-1.5-flash-001)
+          const match = viableModels.find(m => m === p || m.startsWith(p))
+          if (match) {
+            selectedModel = match
+            break
+          }
+        }
       }
+    } catch (e) {
+      console.warn("Failed to list models, using default:", e)
     }
 
-    if (!result) {
-      throw lastError || new Error("All AI models failed.")
-    }
+    console.log(`Using model: ${selectedModel}`)
+    const model = genAI.getGenerativeModel({ model: selectedModel })
     
+    const result = await model.generateContent([
+      prompt,
+      { inlineData: { data: base64Data, mimeType: file.type } }
+    ])
+
     const response = await result.response
     const text = response.text().replace(/```json|```/g, '').trim()
     const data = JSON.parse(text)
