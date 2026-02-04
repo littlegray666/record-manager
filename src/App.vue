@@ -36,7 +36,8 @@ const analyzeImageWithAI = async (file) => {
   isAnalyzingAI.value = true
   try {
     const genAI = new GoogleGenerativeAI(geminiApiKey.value)
-    const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" })
+    // Use specific version model to avoid 404 on alias
+    const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash-002" })
 
     // Convert file to base64
     const base64Data = await new Promise((resolve) => {
