@@ -1,8 +1,9 @@
 <script setup>
 import { ref, computed, onMounted } from 'vue'
 import { Html5QrcodeScanner } from "html5-qrcode"
-import { getAllRecords, addRecordWithImage, deleteRecordFromDB } from './db'
+import { getAllRecords, addRecordWithImage, deleteRecordFromDB, updateRecordStatus } from './db'
 import { GoogleGenerativeAI } from "@google/generative-ai"
+import { exportData, importData } from './backup'
 
 // State
 const records = ref([])
@@ -10,11 +11,12 @@ const searchQuery = ref('')
 const showScanner = ref(false)
 const isSearchingNet = ref(false)
 const isAnalyzingAI = ref(false)
-const newRecord = ref({ title: '', artist: '', type: 'Vinyl', catalog: '', barcode: '' })
+const newRecord = ref({ title: '', artist: '', type: 'Vinyl', catalog: '', barcode: '', status: 'Owned' })
 const newRecordImage = ref(null) // File object
 const newRecordImagePreview = ref(null) // URL for preview
 const geminiApiKey = ref(localStorage.getItem('gemini_api_key') || '')
 const showSettings = ref(false)
+const activeTab = ref('Owned') // Owned | Wishlist
 
 // Save API Key
 const saveApiKey = () => {
@@ -92,13 +94,88 @@ onMounted(async () => {
 // Filtered List
 const filteredRecords = computed(() => {
   const q = searchQuery.value.toLowerCase()
-  return records.value.filter(r => 
-    r.title.toLowerCase().includes(q) || 
-    r.artist.toLowerCase().includes(q) ||
-    r.catalog.toLowerCase().includes(q) ||
-    r.barcode.includes(q)
-  )
+  return records.value.filter(r => {
+    // Filter by tab status
+    const statusMatch = (r.status || 'Owned') === activeTab.value
+    
+    // Filter by search query
+    const searchMatch = 
+      r.title.toLowerCase().includes(q) || 
+      r.artist.toLowerCase().includes(q) ||
+      r.catalog.toLowerCase().includes(q) ||
+      r.barcode.includes(q)
+      
+    return statusMatch && searchMatch
+  })
 })
+
+// Backup Handlers
+const handleExport = async () => {
+  try {
+    await exportData()
+    alert('匯出成功！請妥善保存 JSON 檔案。')
+  } catch (e) {
+    console.error(e)
+    alert('匯出失敗: ' + e.message)
+  }
+}
+
+const handleImport = async (e) => {
+  const file = e.target.files[0]
+  if (!file) return
+  
+  if(!confirm('匯入將會覆蓋/新增資料，確定嗎？')) return
+
+  try {
+    const count = await importData(file)
+    alert(`成功匯入 ${count} 筆資料！`)
+    // Refresh list
+    records.value = await getAllRecords()
+  } catch (e) {
+    console.error(e)
+    alert('匯入失敗: ' + e.message)
+  }
+}
+
+// Move to Owned
+const moveToOwned = async (record) => {
+  try {
+    await updateRecordStatus(record.id, 'Owned')
+    // Update local UI
+    const index = records.value.findIndex(r => r.id === record.id)
+    if(index !== -1) records.value[index].status = 'Owned'
+    alert('已移至收藏庫！')
+  } catch (e) {
+    console.error(e)
+    alert('移動失敗')
+  }
+}
+
+// Add Record
+const addRecord = async () => {
+  if (!newRecord.value.title) return
+  
+  try {
+    // Set status based on active tab
+    newRecord.value.status = activeTab.value
+    
+    const id = await addRecordWithImage(newRecord.value, newRecordImage.value)
+    
+    const savedRecord = { 
+      ...newRecord.value, 
+      id, 
+      image: newRecordImage.value 
+    }
+    records.value.push(savedRecord)
+
+    // Reset Form
+    newRecord.value = { title: '', artist: '', type: 'Vinyl', catalog: '', barcode: '', status: 'Owned' }
+    newRecordImage.value = null
+    newRecordImagePreview.value = null
+  } catch (e) {
+    alert('儲存失敗: ' + e.message)
+  }
+}
 
 // Helper: Blob to URL
 const getImageUrl = (blob) => {
@@ -119,32 +196,6 @@ const handleNewImageSelect = (e) => {
         analyzeImageWithAI(file)
       }
     }
-  }
-}
-
-const addRecord = async () => {
-  if (!newRecord.value.title) return
-  
-  try {
-    // Add to DB
-    const id = await addRecordWithImage(newRecord.value, newRecordImage.value)
-    
-    // Update local state (refresh list or push)
-    // Reloading all is safer for ID syncing, but pushing is faster. 
-    // Let's just push manually to UI state.
-    const savedRecord = { 
-      ...newRecord.value, 
-      id, 
-      image: newRecordImage.value 
-    }
-    records.value.push(savedRecord)
-
-    // Reset Form
-    newRecord.value = { title: '', artist: '', type: 'Vinyl', catalog: '', barcode: '' }
-    newRecordImage.value = null
-    newRecordImagePreview.value = null
-  } catch (e) {
-    alert('儲存失敗: ' + e.message)
   }
 }
 
@@ -228,25 +279,53 @@ const autoFillByTitle = () => {
 
 <template>
   <div class="container mx-auto p-6 max-w-3xl">
-    <header class="mb-8 flex justify-between items-center border-b border-gray-700 pb-4">
-      <h1 class="text-2xl font-bold text-emerald-400">💿 唱片管理系統 <span class="text-xs text-gray-500">v0.4 (AI)</span></h1>
-      <div class="flex items-center gap-4">
-        <button @click="showSettings = !showSettings" class="text-gray-400 hover:text-white transition">
-          ⚙️ 設定
+    <header class="mb-8 border-b border-gray-700 pb-4">
+      <div class="flex justify-between items-center mb-4">
+        <h1 class="text-2xl font-bold text-emerald-400">💿 唱片管理 <span class="text-xs text-gray-500">v0.5</span></h1>
+        <div class="flex items-center gap-3">
+          <button @click="showSettings = !showSettings" class="text-gray-400 hover:text-white transition">⚙️</button>
+          <div class="text-sm bg-gray-800 px-2 py-1 rounded">{{ records.length }}</div>
+        </div>
+      </div>
+
+      <!-- Tabs -->
+      <div class="flex gap-2">
+        <button @click="activeTab = 'Owned'" 
+                class="flex-1 py-2 rounded font-bold transition border-b-2"
+                :class="activeTab === 'Owned' ? 'text-emerald-400 border-emerald-500 bg-gray-800' : 'text-gray-500 border-transparent hover:bg-gray-800/50'">
+          🎵 收藏庫
         </button>
-        <div class="text-sm">Total: {{ records.length }}</div>
+        <button @click="activeTab = 'Wishlist'" 
+                class="flex-1 py-2 rounded font-bold transition border-b-2"
+                :class="activeTab === 'Wishlist' ? 'text-pink-400 border-pink-500 bg-gray-800' : 'text-gray-500 border-transparent hover:bg-gray-800/50'">
+          ❤️ 願望清單
+        </button>
       </div>
     </header>
 
     <!-- Settings Modal -->
-    <div v-if="showSettings" class="mb-8 bg-gray-800 p-4 rounded border border-gray-600">
-      <h3 class="font-bold mb-2">設定 Gemini API Key</h3>
-      <div class="flex gap-2">
-        <input type="password" v-model="geminiApiKey" placeholder="貼上 API Key (AI 辨識用)" 
-               class="bg-gray-700 p-2 rounded flex-1 text-white" />
-        <button @click="saveApiKey" class="bg-blue-600 hover:bg-blue-500 px-4 rounded font-bold">儲存</button>
+    <div v-if="showSettings" class="mb-8 bg-gray-800 p-4 rounded border border-gray-600 space-y-4">
+      <div>
+        <h3 class="font-bold mb-2 text-sm text-gray-400">Gemini API Key (AI 辨識)</h3>
+        <div class="flex gap-2">
+          <input type="password" v-model="geminiApiKey" placeholder="貼上 API Key" 
+                 class="bg-gray-700 p-2 rounded flex-1 text-white text-sm" />
+          <button @click="saveApiKey" class="bg-blue-600 hover:bg-blue-500 px-3 rounded font-bold text-sm">儲存</button>
+        </div>
       </div>
-      <p class="text-xs text-gray-500 mt-2">Key 僅儲存於本地瀏覽器，不會上傳伺服器。</p>
+      
+      <div class="border-t border-gray-700 pt-4">
+        <h3 class="font-bold mb-2 text-sm text-gray-400">資料備份</h3>
+        <div class="flex gap-2">
+          <button @click="handleExport" class="bg-green-600 hover:bg-green-500 px-4 py-2 rounded text-sm font-bold flex-1">
+            📤 匯出 JSON
+          </button>
+          <label class="bg-orange-600 hover:bg-orange-500 px-4 py-2 rounded text-sm font-bold flex-1 text-center cursor-pointer">
+            📥 匯入 JSON
+            <input type="file" @change="handleImport" class="hidden" accept=".json" />
+          </label>
+        </div>
+      </div>
     </div>
 
     <!-- Search & Tools -->
@@ -275,7 +354,9 @@ const autoFillByTitle = () => {
       </div>
       
       <div class="flex justify-between items-center mb-4">
-        <h3 class="font-bold text-gray-300">➕ 新增收藏</h3>
+        <h3 class="font-bold" :class="activeTab === 'Wishlist' ? 'text-pink-400' : 'text-emerald-400'">
+          {{ activeTab === 'Wishlist' ? '❤️ 新增願望' : '➕ 新增收藏' }}
+        </h3>
         <button type="button" @click="autoFillByTitle" class="text-xs bg-gray-700 hover:bg-gray-600 px-2 py-1 rounded text-emerald-400">
           🔍 用標題自動填寫
         </button>
@@ -338,9 +419,15 @@ const autoFillByTitle = () => {
           </div>
         </div>
 
-        <button @click="deleteRecord(rec.id)" class="text-gray-600 hover:text-red-400 p-2 absolute top-2 right-2 group-hover:opacity-100 opacity-0 transition">
-          🗑️
-        </button>
+        <div class="text-right flex flex-col items-end gap-2">
+          <div class="flex gap-2">
+            <button v-if="rec.status === 'Wishlist'" @click="moveToOwned(rec)" class="text-xs font-bold px-2 py-1 rounded bg-emerald-600 hover:bg-emerald-500 text-white transition shadow-sm">
+              ➕ 購入
+            </button>
+            <span class="text-xs font-bold px-2 py-1 rounded bg-gray-700 border border-gray-600">{{ rec.type }}</span>
+          </div>
+          <button @click="deleteRecord(rec.id)" class="text-gray-500 hover:text-red-400 text-sm p-1">✕</button>
+        </div>
       </div>
     </div>
   </div>
