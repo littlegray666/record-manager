@@ -35,6 +35,26 @@ const analyzeImageWithAI = async (file) => {
 
   isAnalyzingAI.value = true
   try {
+    const genAI = new GoogleGenerativeAI(geminiApiKey.value)
+    
+    // Convert file to base64
+    const base64Data = await new Promise((resolve) => {
+      const reader = new FileReader()
+      reader.onloadend = () => resolve(reader.result.split(',')[1])
+      reader.readAsDataURL(file)
+    })
+
+    const prompt = `Analyze this image of a music album (cover or back). 
+    Extract the following details and return them in STRICT JSON format:
+    {
+      "artist": "Artist Name",
+      "title": "Album Title",
+      "catalog": "Catalog Number (if visible)",
+      "barcode": "Barcode Number (if visible)",
+      "type": "Vinyl or CD or Cassette (guess based on shape/spine)"
+    }
+    If you can't find specific info, leave it empty string. Do not use code blocks.`
+
     const modelsToTry = ["gemini-1.5-flash", "gemini-1.5-pro", "gemini-1.5-flash-8b"]
     let model = null
     let result = null
