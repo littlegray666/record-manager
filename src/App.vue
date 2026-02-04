@@ -190,10 +190,16 @@ const handleNewImageSelect = (e) => {
     newRecordImage.value = file
     newRecordImagePreview.value = URL.createObjectURL(file)
     
-    // Trigger AI analysis if key is present
+    // Trigger AI analysis if key is present, OR prompt to set it up
     if (geminiApiKey.value) {
       if(confirm('要使用 AI 自動分析這張圖片的資訊嗎？')) {
         analyzeImageWithAI(file)
+      }
+    } else {
+      if(confirm('要使用 AI 自動分析圖片嗎？(需要設定 API Key)')) {
+        showSettings.value = true
+        // Delay alert slightly to let modal open
+        setTimeout(() => alert('請在此輸入您的 Gemini API Key 以啟用 AI 辨識功能。'), 100)
       }
     }
   }
