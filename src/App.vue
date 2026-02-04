@@ -55,7 +55,7 @@ const analyzeImageWithAI = async (file) => {
     }
     If you can't find specific info, leave it empty string. Do not use code blocks.`
 
-    const modelsToTry = ["gemini-1.5-flash", "gemini-1.5-pro", "gemini-1.5-flash-8b"]
+    const modelsToTry = ["gemini-1.5-flash", "gemini-1.5-pro", "gemini-1.5-flash-8b", "gemini-pro-vision"]
     let model = null
     let result = null
     let lastError = null
