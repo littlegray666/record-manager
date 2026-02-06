@@ -30,9 +30,30 @@ const geminiApiKey = ref(localStorage.getItem('gemini_api_key') || '')
 const showSettings = ref(false)
 const activeTab = ref('Owned') // Owned | Wishlist
 const expandedId = ref(null) // Track which record is expanded
+const isEditing = ref(false) // Edit mode flag
 
 const toggleExpand = (id) => {
   expandedId.value = expandedId.value === id ? null : id
+}
+
+const editRecord = (record) => {
+  newRecord.value = JSON.parse(JSON.stringify(record)) // Deep copy to form
+  newRecordImage.value = null // Keep existing image unless changed
+  newRecordImagePreview.value = record.image ? getImageUrl(record.image) : null
+  isEditing.value = true
+  
+  // Scroll to form
+  document.querySelector('form')?.scrollIntoView({ behavior: 'smooth' })
+}
+
+const cancelEdit = () => {
+  isEditing.value = false
+  newRecord.value = { 
+    title: '', artist: '', type: 'Vinyl', catalog: '', barcode: '', status: 'Owned',
+    tracklist: '', description: '', marketPrice: '', links: '' 
+  }
+  newRecordImage.value = null
+  newRecordImagePreview.value = null
 }
 
 // Save API Key
@@ -233,22 +254,44 @@ const moveToOwned = async (record) => {
   }
 }
 
-// Add Record
+// Add or Update Record
 const addRecord = async () => {
   if (!newRecord.value.title) return
   
   try {
-    // Set status based on active tab
-    newRecord.value.status = activeTab.value
+    // If not editing, set status based on active tab
+    if (!isEditing.value) {
+      newRecord.value.status = activeTab.value
+    }
     
+    // addRecordWithImage handles both add (if no ID) and update (if ID exists)
+    // IndexedDB .put() is an upsert operation.
     const id = await addRecordWithImage(newRecord.value, newRecordImage.value)
     
-    const savedRecord = { 
-      ...newRecord.value, 
-      id, 
-      image: newRecordImage.value 
+    // Update local state
+    if (isEditing.value) {
+      // Find and replace in list
+      const index = records.value.findIndex(r => r.id === newRecord.value.id)
+      if (index !== -1) {
+        // We need to reload to get the image blob/url right if changed
+        // Or manually patch it. Let's just patch for now.
+        const updated = { ...newRecord.value, id }
+        if (newRecordImage.value) updated.image = newRecordImage.value
+        else updated.image = records.value[index].image // Keep old image if not replaced
+        
+        records.value[index] = updated
+      }
+      isEditing.value = false
+      alert('修改已儲存！')
+    } else {
+      // Add new
+      const savedRecord = { 
+        ...newRecord.value, 
+        id, 
+        image: newRecordImage.value 
+      }
+      records.value.push(savedRecord)
     }
-    records.value.push(savedRecord)
 
     // Reset Form
     newRecord.value = { 
@@ -447,19 +490,24 @@ const autoFillByTitle = () => {
     <!-- Scanner Area -->
     <div v-if="showScanner" id="reader" class="mb-8 bg-black rounded overflow-hidden shadow-lg"></div>
 
-    <!-- Add Form -->
-    <form @submit.prevent="addRecord" class="bg-gray-800 p-4 rounded mb-8 border border-gray-700 relative">
+    <!-- Add/Edit Form -->
+    <form @submit.prevent="addRecord" class="bg-gray-800 p-4 rounded mb-8 border border-gray-700 relative" :class="{'ring-2 ring-blue-500': isEditing}">
       <div v-if="isSearchingNet || isAnalyzingAI" class="absolute inset-0 bg-gray-900/80 z-10 flex items-center justify-center text-emerald-400 font-bold rounded">
         {{ isAnalyzingAI ? '🤖 AI 分析圖片中...' : '連線搜尋中...' }}
       </div>
       
       <div class="flex justify-between items-center mb-4">
-        <h3 class="font-bold" :class="activeTab === 'Wishlist' ? 'text-pink-400' : 'text-emerald-400'">
-          {{ activeTab === 'Wishlist' ? '❤️ 新增願望' : '➕ 新增收藏' }}
+        <h3 class="font-bold" :class="isEditing ? 'text-blue-400' : (activeTab === 'Wishlist' ? 'text-pink-400' : 'text-emerald-400')">
+          {{ isEditing ? '✏️ 編輯唱片' : (activeTab === 'Wishlist' ? '❤️ 新增願望' : '➕ 新增收藏') }}
         </h3>
-        <button type="button" @click="autoFillByTitle" class="text-xs bg-gray-700 hover:bg-gray-600 px-2 py-1 rounded text-emerald-400">
-          🔍 用標題自動填寫
-        </button>
+        <div class="flex gap-2">
+          <button v-if="isEditing" type="button" @click="cancelEdit" class="text-xs bg-gray-600 hover:bg-gray-500 px-2 py-1 rounded text-white">
+            取消
+          </button>
+          <button type="button" @click="autoFillByTitle" class="text-xs bg-gray-700 hover:bg-gray-600 px-2 py-1 rounded text-emerald-400">
+            🔍 用標題自動填寫
+          </button>
+        </div>
       </div>
       
       <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
@@ -502,8 +550,9 @@ const autoFillByTitle = () => {
            </div>
         </div>
       </div>
-      <button class="bg-emerald-600 hover:bg-emerald-500 w-full py-2 rounded font-bold transition shadow-lg shadow-emerald-900/50">
-        儲存到本地資料庫
+      <button class="w-full py-2 rounded font-bold transition shadow-lg mt-4"
+              :class="isEditing ? 'bg-blue-600 hover:bg-blue-500 shadow-blue-900/50' : 'bg-emerald-600 hover:bg-emerald-500 shadow-emerald-900/50'">
+        {{ isEditing ? '💾 儲存變更' : '儲存到本地資料庫' }}
       </button>
     </form>
 
@@ -533,6 +582,11 @@ const autoFillByTitle = () => {
           
           <!-- Expanded Details View -->
           <div v-if="expandedId === rec.id" class="mt-4 pt-4 border-t border-gray-700 text-sm text-gray-300 space-y-2 animate-fade-in cursor-auto" @click.stop>
+            <div class="flex justify-end mb-2">
+              <button @click="editRecord(rec)" class="bg-blue-600 hover:bg-blue-500 px-3 py-1 rounded text-xs font-bold transition">
+                ✏️ 編輯
+              </button>
+            </div>
             <div v-if="rec.description">
               <span class="text-emerald-400 font-bold">📝 介紹:</span>
               <p class="mt-1 bg-gray-900/50 p-2 rounded">{{ rec.description }}</p>
