@@ -11,7 +11,18 @@ const searchQuery = ref('')
 const showScanner = ref(false)
 const isSearchingNet = ref(false)
 const isAnalyzingAI = ref(false)
-const newRecord = ref({ title: '', artist: '', type: 'Vinyl', catalog: '', barcode: '', status: 'Owned' })
+const newRecord = ref({ 
+  title: '', 
+  artist: '', 
+  type: 'Vinyl', 
+  catalog: '', 
+  barcode: '', 
+  status: 'Owned',
+  tracklist: '',
+  description: '',
+  marketPrice: '',
+  links: ''
+})
 const newRecordImage = ref(null) // File object
 const newRecordImagePreview = ref(null) // URL for preview
 const geminiApiKey = ref(localStorage.getItem('gemini_api_key') || '')
@@ -51,7 +62,11 @@ const analyzeImageWithAI = async (file) => {
       "title": "Album Title",
       "catalog": "Catalog Number (if visible)",
       "barcode": "Barcode Number (if visible)",
-      "type": "Vinyl or CD or Cassette (guess based on shape/spine)"
+      "type": "Vinyl or CD or Cassette (guess based on shape/spine)",
+      "tracklist": "List of tracks if visible (separated by newline)",
+      "description": "Brief description of the artist/album style (e.g. 'Classic Jazz album from 1959...')",
+      "marketPrice": "Estimated market value range (e.g. '$20-$50')",
+      "links": "Relevant Discogs/Wikipedia links if known (separated by newline)"
     }
     If you can't find specific info, leave it empty string. Do not use code blocks.`
 
@@ -108,8 +123,12 @@ const analyzeImageWithAI = async (file) => {
     if (data.catalog) newRecord.value.catalog = data.catalog
     if (data.barcode) newRecord.value.barcode = data.barcode
     if (data.type) newRecord.value.type = data.type
+    if (data.tracklist) newRecord.value.tracklist = data.tracklist
+    if (data.description) newRecord.value.description = data.description
+    if (data.marketPrice) newRecord.value.marketPrice = data.marketPrice
+    if (data.links) newRecord.value.links = data.links
 
-    alert(`🤖 AI 分析完成！\n藝人: ${data.artist}\n專輯: ${data.title}`)
+    alert(`🤖 AI 分析完成！\n藝人: ${data.artist}\n專輯: ${data.title}\n估價: ${data.marketPrice || '未知'}`)
 
   } catch (e) {
     console.error(e)
@@ -206,7 +225,10 @@ const addRecord = async () => {
     records.value.push(savedRecord)
 
     // Reset Form
-    newRecord.value = { title: '', artist: '', type: 'Vinyl', catalog: '', barcode: '', status: 'Owned' }
+    newRecord.value = { 
+      title: '', artist: '', type: 'Vinyl', catalog: '', barcode: '', status: 'Owned',
+      tracklist: '', description: '', marketPrice: '', links: '' 
+    }
     newRecordImage.value = null
     newRecordImagePreview.value = null
   } catch (e) {
@@ -430,6 +452,19 @@ const autoFillByTitle = () => {
               <img :src="newRecordImagePreview" class="w-full h-full object-cover" />
             </div>
           </div>
+        </div>
+
+        <!-- Expanded Details Fields -->
+        <div class="md:col-span-2 space-y-4 border-t border-gray-700 pt-4 mt-2">
+           <h4 class="font-bold text-gray-400 text-sm">📝 詳細資訊 (AI 自動填寫)</h4>
+           <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+             <textarea v-model="newRecord.tracklist" placeholder="曲目列表 (Tracklist)" rows="3" class="bg-gray-700 p-2 rounded w-full focus:ring-2 ring-emerald-500 outline-none text-sm"></textarea>
+             <textarea v-model="newRecord.description" placeholder="專輯介紹 / 藝人簡介" rows="3" class="bg-gray-700 p-2 rounded w-full focus:ring-2 ring-emerald-500 outline-none text-sm"></textarea>
+           </div>
+           <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+             <input v-model="newRecord.marketPrice" placeholder="💰 市場估價" class="bg-gray-700 p-2 rounded w-full focus:ring-2 ring-emerald-500 outline-none text-sm" />
+             <input v-model="newRecord.links" placeholder="🔗 相關連結 (Discogs / Wiki)" class="bg-gray-700 p-2 rounded w-full focus:ring-2 ring-emerald-500 outline-none text-sm" />
+           </div>
         </div>
       </div>
       <button class="bg-emerald-600 hover:bg-emerald-500 w-full py-2 rounded font-bold transition shadow-lg shadow-emerald-900/50">
