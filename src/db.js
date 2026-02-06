@@ -39,13 +39,20 @@ export async function updateRecordStatus(id, status) {
 
 export async function addRecordWithImage(record, imageFile) {
   const db = await dbPromise;
-  const recordToSave = { ...record };
+  // Ensure new fields are preserved
+  const recordToSave = JSON.parse(JSON.stringify(record)); // Clone to avoid proxy issues
   if (imageFile) {
     recordToSave.image = imageFile; 
   }
   // Default status if not present
   if (!recordToSave.status) recordToSave.status = 'Owned';
   
+  // Ensure optional fields exist even if empty (for schema consistency)
+  recordToSave.tracklist = recordToSave.tracklist || '';
+  recordToSave.description = recordToSave.description || '';
+  recordToSave.marketPrice = recordToSave.marketPrice || '';
+  recordToSave.links = recordToSave.links || '';
+
   return db.put(STORE_NAME, recordToSave);
 }
 
