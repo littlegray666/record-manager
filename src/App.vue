@@ -85,13 +85,13 @@ const analyzeImageWithAI = async (file) => {
     const prompt = `Analyze this image of a music album (cover or back). 
     Extract the following details and return them in STRICT JSON format:
     {
-      "artist": "Artist Name",
-      "title": "Album Title",
+      "artist": "Artist Name (If not visible, recognize the character or style to guess)",
+      "title": "Album Title (If not visible, infer from text like 'Almond Chocolate')",
       "catalog": "Catalog Number (if visible)",
       "barcode": "Barcode Number (if visible)",
       "type": "Vinyl or CD or Cassette (guess based on shape/spine)",
       "tracklist": "List of tracks if visible (separated by newline)",
-      "description": "Brief description of the artist/album style in Traditional Chinese (繁體中文). Translate if necessary.",
+      "description": "Brief description of the artist/album style in Traditional Chinese (繁體中文). Translate if necessary. NOTE: If the image is an anime/game character art (e.g. Blue Archive, VTuber), identify the character and source material.",
       "marketPrice": "Estimated market value range (e.g. '$20-$50')",
       "links": "Relevant Discogs/Wikipedia links if known (separated by newline)"
     }
