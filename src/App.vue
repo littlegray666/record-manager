@@ -64,7 +64,7 @@ const analyzeImageWithAI = async (file) => {
       "barcode": "Barcode Number (if visible)",
       "type": "Vinyl or CD or Cassette (guess based on shape/spine)",
       "tracklist": "List of tracks if visible (separated by newline)",
-      "description": "Brief description of the artist/album style (e.g. 'Classic Jazz album from 1959...')",
+      "description": "Brief description of the artist/album style in Traditional Chinese (繁體中文). Translate if necessary.",
       "marketPrice": "Estimated market value range (e.g. '$20-$50')",
       "links": "Relevant Discogs/Wikipedia links if known (separated by newline)"
     }
