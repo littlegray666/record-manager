@@ -4,6 +4,7 @@ import { Html5QrcodeScanner } from "html5-qrcode"
 import { getAllRecords, addRecordWithImage, deleteRecordFromDB, updateRecordStatus } from './db'
 import { GoogleGenerativeAI } from "@google/generative-ai"
 import { exportData, importData } from './backup'
+import { syncData } from './sync'
 
 // State
 const records = ref([])
@@ -143,6 +144,24 @@ const analyzeImageWithAI = async (file) => {
   }
 }
 
+const isSyncing = ref(false)
+
+// Sync Handler
+const handleSync = async () => {
+  if (isSyncing.value) return
+  isSyncing.value = true
+  try {
+    const { pushed, pulled } = await syncData()
+    alert(`同步完成！\n⬆️ 上傳: ${pushed} 筆\n⬇️ 下載: ${pulled} 筆`)
+    // Refresh list
+    records.value = await getAllRecords()
+  } catch (e) {
+    alert('同步失敗 (請確認 Server 是否啟動): ' + e.message)
+  } finally {
+    isSyncing.value = false
+  }
+}
+
 // Load from DB on mount
 onMounted(async () => {
   try {
@@ -156,6 +175,8 @@ onMounted(async () => {
 const filteredRecords = computed(() => {
   const q = searchQuery.value.toLowerCase()
   return records.value.filter(r => {
+    if (r.deleted) return false // Hide soft-deleted records
+    
     // Filter by tab status
     const statusMatch = (r.status || 'Owned') === activeTab.value
     
@@ -395,6 +416,15 @@ const autoFillByTitle = () => {
             <input type="file" @change="handleImport" class="hidden" accept=".json" />
           </label>
         </div>
+      </div>
+
+      <div class="border-t border-gray-700 pt-4">
+        <h3 class="font-bold mb-2 text-sm text-gray-400">雲端同步 (自架 Server)</h3>
+        <button @click="handleSync" :disabled="isSyncing" 
+                class="bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 px-4 py-2 rounded text-sm font-bold w-full flex items-center justify-center gap-2">
+          <span v-if="isSyncing" class="animate-spin">🔄</span>
+          {{ isSyncing ? '同步中...' : '☁️ 立即同步' }}
+        </button>
       </div>
     </div>
 
