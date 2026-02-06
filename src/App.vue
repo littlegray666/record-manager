@@ -82,67 +82,120 @@ const analyzeImageWithAI = async (file) => {
       reader.readAsDataURL(file)
     })
 
-    const prompt = `Analyze this image of a music album (cover or back). 
-    Extract the following details and return them in STRICT JSON format:
-    {
-      "artist": "Artist Name (If not visible, recognize the character or style to guess)",
-      "title": "Album Title (If not visible, infer from text like 'Almond Chocolate')",
-      "catalog": "Catalog Number (if visible)",
-      "barcode": "Barcode Number (if visible)",
-      "type": "Vinyl or CD or Cassette (guess based on shape/spine)",
-      "tracklist": "List of tracks if visible (separated by newline)",
-      "description": "Brief description of the artist/album style in Traditional Chinese (繁體中文). Translate if necessary. NOTE: If the image is an anime/game character art (e.g. Blue Archive, VTuber), identify the character and source material.",
-      "marketPrice": "Estimated market value range (e.g. '$20-$50')",
-      "links": "Relevant Discogs/Wikipedia links if known (separated by newline)"
-    }
-    If you can't find specific info, leave it empty string. Do not use code blocks.`
-
-    // 1. Dynamic Model Discovery
-    let selectedModel = "gemini-1.5-flash" // Default fallback
-    try {
-      const listResp = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${geminiApiKey.value}`)
-      if (listResp.ok) {
-        const listData = await listResp.json()
-        // Filter for Gemini models that support content generation
-        const viableModels = listData.models
-          .filter(m => 
-            m.supportedGenerationMethods.includes("generateContent") && 
-            m.name.includes("gemini")
-          )
-          .map(m => m.name.replace("models/", ""))
-        
-        console.log("Available models from API:", viableModels)
-
-        // Sort by version number (descending) to find the "newest"
-        // Extracts "1.5", "2.0", etc.
-        viableModels.sort((a, b) => {
-          const getVer = (s) => {
-            const match = s.match(/(\d+)\.(\d+)/)
-            return match ? parseFloat(match[0]) : 0
-          }
-          return getVer(b) - getVer(a)
-        })
-
-        if (viableModels.length > 0) {
-          selectedModel = viableModels[0] // Pick the highest version model
-          console.log(`Auto-selected newest model: ${selectedModel}`)
-        }
-      }
-    } catch (e) {
-      console.warn("Failed to list models, using default:", e)
-    }
-
-    console.log(`Using model: ${selectedModel}`)
-    const model = genAI.getGenerativeModel({ model: selectedModel })
+    const modelsToTry = ["gemini-1.5-flash", "gemini-1.5-pro", "gemini-1.5-flash-8b", "gemini-pro-vision"]
     
-    const result = await model.generateContent([
-      prompt,
+    // --- Phase 1: Vision Extraction ---
+    console.log("Phase 1: Extracting raw keywords from image...")
+    
+    // Prompt focused on raw extraction
+    const extractionPrompt = `Look at this album cover. 
+    Extract any VISIBLE text that looks like:
+    1. Album Title
+    2. Artist Name
+    3. Catalog Number (e.g. VICL-60001, UPCH-1001)
+    4. Barcode (digits)
+    
+    Return ONLY a raw JSON object with these fields (use null if not found):
+    {
+      "rawTitle": "string",
+      "rawArtist": "string",
+      "rawCatalog": "string", 
+      "rawBarcode": "string"
+    }
+    Do not guess or Hallucinate. Only what you see.`
+
+    let extractedData = null
+
+    // Call Gemini (Vision)
+    // Reuse the dynamic model selection logic
+    const model = genAI.getGenerativeModel({ model: selectedModel })
+    const extractResult = await model.generateContent([
+      extractionPrompt,
       { inlineData: { data: base64Data, mimeType: file.type } }
     ])
+    const extractText = (await extractResult.response).text().replace(/```json|```/g, '').trim()
+    try {
+      extractedData = JSON.parse(extractText)
+      console.log("Extracted Keywords:", extractedData)
+    } catch (e) {
+      console.warn("Failed to parse extraction JSON, falling back to direct analysis", e)
+    }
 
-    const response = await result.response
-    const text = response.text().replace(/```json|```/g, '').trim()
-    const data = JSON.parse(text)
+    // --- Phase 2: Search Enhancement (MusicBrainz) ---
+    let searchResult = null
+    if (extractedData) {
+      const queries = []
+      // Priority 1: Catalog Number (Most precise)
+      if (extractedData.rawCatalog) queries.push(`catno:${extractedData.rawCatalog}`)
+      // Priority 2: Barcode
+      if (extractedData.rawBarcode) queries.push(`barcode:${extractedData.rawBarcode}`)
+      // Priority 3: Title + Artist
+      if (extractedData.rawTitle) {
+        let q = `release:${extractedData.rawTitle}`
+        if (extractedData.rawArtist) q += ` AND artist:${extractedData.rawArtist}`
+        queries.push(q)
+      }
+
+      console.log("Phase 2: Searching MusicBrainz with queries:", queries)
+      
+      // Try queries in order
+      for (const q of queries) {
+        try {
+          const resp = await fetch(`https://musicbrainz.org/ws/2/release/?query=${encodeURIComponent(q)}&fmt=json`, {
+            headers: { 'User-Agent': 'VinylManagerDemo/0.1 ( littlegray666@example.com )' }
+          })
+          const mbData = await resp.json()
+          if (mbData.releases && mbData.releases.length > 0) {
+            const match = mbData.releases[0] // Best match
+            console.log("Found MusicBrainz match:", match)
+            searchResult = {
+              title: match.title,
+              artist: match['artist-credit']?.[0]?.name,
+              catalog: match['label-info']?.[0]?.['catalog-number'],
+              barcode: match.barcode,
+              date: match.date,
+              type: match.media?.[0]?.format
+            }
+            break // Stop if found
+          }
+        } catch (e) {
+          console.warn("MB Search failed for query:", q, e)
+        }
+      }
+    }
+
+    // --- Phase 3: Final Synthesis (AI + Search Data) ---
+    console.log("Phase 3: Synthesizing final result...")
+    
+    // We feed the search result BACK to AI to generate the final rich description
+    const synthesisPrompt = `You are an expert music archivist.
+    
+    I have an image of an album cover (attached).
+    ${searchResult ? `I also found this likely match in the database: ${JSON.stringify(searchResult)}` : 'I could not find a database match, rely on the image.'}
+    
+    Please combine the visual information and the database info (if available) to fill this form.
+    Database info is usually more accurate for text, but trust the image for visual style.
+    
+    Return STRICT JSON:
+    {
+      "artist": "Artist Name",
+      "title": "Album Title",
+      "catalog": "Catalog Number",
+      "barcode": "Barcode",
+      "type": "Vinyl/CD/Cassette",
+      "tracklist": "List of tracks (if visible on image OR known from database context)",
+      "description": "Brief description in Traditional Chinese (繁體中文). If database info exists, include release year and genre.",
+      "marketPrice": "Estimated market value range (e.g. '$20-$50')",
+      "links": "Relevant Discogs/Wikipedia links (if known)"
+    }`
+
+    const finalResult = await model.generateContent([
+      synthesisPrompt,
+      { inlineData: { data: base64Data, mimeType: file.type } }
+    ])
+    
+    const finalText = (await finalResult.response).text().replace(/```json|```/g, '').trim()
+    const data = JSON.parse(finalText)
 
     // Auto-fill form
     if (data.title) newRecord.value.title = data.title
