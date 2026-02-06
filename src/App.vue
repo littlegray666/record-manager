@@ -28,6 +28,11 @@ const newRecordImagePreview = ref(null) // URL for preview
 const geminiApiKey = ref(localStorage.getItem('gemini_api_key') || '')
 const showSettings = ref(false)
 const activeTab = ref('Owned') // Owned | Wishlist
+const expandedId = ref(null) // Track which record is expanded
+
+const toggleExpand = (id) => {
+  expandedId.value = expandedId.value === id ? null : id
+}
 
 // Save API Key
 const saveApiKey = () => {
@@ -488,12 +493,31 @@ const autoFillByTitle = () => {
           <div v-else class="w-full h-full flex items-center justify-center text-2xl">🎵</div>
         </div>
 
-        <div class="flex-1 min-w-0">
+        <div class="flex-1 min-w-0 cursor-pointer" @click="toggleExpand(rec.id)">
           <div class="font-bold text-lg truncate">{{ rec.title }}</div>
           <div class="text-gray-400 text-sm truncate">{{ rec.artist }} <span v-if="rec.catalog">• {{ rec.catalog }}</span></div>
           <div class="text-xs text-gray-500 mt-1 font-mono tracking-wider flex items-center gap-2">
             <span v-if="rec.barcode">BAR: {{ rec.barcode }}</span>
             <span class="text-xs font-bold px-2 py-0.5 rounded bg-gray-700 border border-gray-600">{{ rec.type }}</span>
+          </div>
+          
+          <!-- Expanded Details View -->
+          <div v-if="expandedId === rec.id" class="mt-4 pt-4 border-t border-gray-700 text-sm text-gray-300 space-y-2 animate-fade-in cursor-auto" @click.stop>
+            <div v-if="rec.description">
+              <span class="text-emerald-400 font-bold">📝 介紹:</span>
+              <p class="mt-1 bg-gray-900/50 p-2 rounded">{{ rec.description }}</p>
+            </div>
+            <div v-if="rec.tracklist">
+              <span class="text-emerald-400 font-bold">🎵 曲目:</span>
+              <pre class="mt-1 bg-gray-900/50 p-2 rounded whitespace-pre-wrap font-sans text-xs">{{ rec.tracklist }}</pre>
+            </div>
+            <div v-if="rec.marketPrice">
+              <span class="text-emerald-400 font-bold">💰 估價:</span> {{ rec.marketPrice }}
+            </div>
+            <div v-if="rec.links">
+              <span class="text-emerald-400 font-bold">🔗 連結:</span>
+              <a v-for="(link, i) in rec.links.split('\n')" :key="i" :href="link" target="_blank" class="block text-blue-400 hover:underline truncate">{{ link }}</a>
+            </div>
           </div>
         </div>
 
